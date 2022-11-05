@@ -24,6 +24,8 @@ def load_eon_w1000_report() -> str:
     eon_username = os.environ['EON_LOGIN']
     eon_password = os.environ['EON_PASS']
     eon_reportid = os.environ['EON_REPORTID']
+    eon_report_start_month = os.environ['EON_REPORT_START_MONTH']
+    eon_report_start_day = os.environ['EON_REPORT_START_DAY']
 
     base_url = "https://energia.eon-hungaria.hu/W1000/"
     login_url = "Account/Login"
@@ -49,12 +51,18 @@ def load_eon_w1000_report() -> str:
         logging.error('login error')
         return '[]'
 
-    this_year_start = datetime.datetime.today().strftime('%Y-01-01')
-    next_month_start = (datetime.datetime.today() + datetime.timedelta(days=32)).strftime('%Y-%m-01')
+    today = datetime.date.today()
+    this_year_start = today.replace(month=1, day=1)
+    current_billing_date = datetime.date(year=today.year, month=int(eon_report_start_month), day=int(eon_report_start_day))
+    if(current_billing_date > today):
+        current_billing_date = current_billing_date.replace(year=today.year-1)
+    
+    since = min(this_year_start, current_billing_date)
+    next_month_start = (today + datetime.timedelta(days=32)).strftime('%Y-%m-01')
 
     report_content = s.get(base_url + report_url, data={
         "reportId": eon_reportid,
-        "since": this_year_start,
+        "since": since,
         "until": next_month_start,
         "_": int(datetime.datetime.utcnow().timestamp()*1e3)
     })
@@ -78,7 +86,7 @@ def store_json_blob(data: str):
 
     content_settings = ContentSettings(
         content_type='application/json',
-        content_encoding='gzip'
+        content_encoding='gzip',
     )
 
     blob_client.upload_blob(
