@@ -4,6 +4,7 @@ import datetime
 import logging
 import requests
 import re
+import json
 
 import azure.functions as func
 from azure.storage.blob import BlobServiceClient, ContentSettings
@@ -12,7 +13,8 @@ def main(mytimer: func.TimerRequest) -> None:
     utc_timestamp = datetime.datetime.utcnow().replace(
         tzinfo=datetime.timezone.utc).isoformat()
 
-    eon_json_data = load_eon_w1000_report()
+    eon_csv_data = load_eon_w1000_report_csv()
+    eon_json_data = convert_eon_csv_to_json(eon_csv_data)
     store_json_blob(eon_json_data)
 
     if mytimer.past_due:
@@ -20,7 +22,7 @@ def main(mytimer: func.TimerRequest) -> None:
 
     logging.info('Python timer trigger function ran at %s', utc_timestamp)
 
-def load_eon_w1000_report() -> str:
+def load_eon_w1000_report_csv() -> str:
     eon_username = os.environ['EON_LOGIN']
     eon_password = os.environ['EON_PASS']
     eon_reportid = os.environ['EON_REPORTID']
@@ -29,7 +31,7 @@ def load_eon_w1000_report() -> str:
 
     base_url = "https://energia.eon-hungaria.hu/W1000/"
     login_url = "Account/Login"
-    report_url = "Reports/ChartData"
+    report_url = "ExportReport/Export"
 
     s = requests.Session()
     login_page = s.get(base_url + login_url).text
@@ -60,14 +62,40 @@ def load_eon_w1000_report() -> str:
     since = min(this_year_start, current_billing_date)
     next_month_start = (today + datetime.timedelta(days=32)).strftime('%Y-%m-01')
 
-    report_content = s.get(base_url + report_url, data={
+    report_content = s.post(base_url + report_url, data={
         "reportId": eon_reportid,
         "since": since,
         "until": next_month_start,
-        "_": int(datetime.datetime.utcnow().timestamp()*1e3)
+        "decimalSeparator": ".",
+        "viewtype": "3",
+        "exportformat": "3",
+        "includestatus": "true",
     })
 
     return report_content.text
+
+def convert_eon_csv_to_json(csv_text: str) -> str:
+    json_data = []
+
+    tmp = dict()
+    for line in csv_text.splitlines()[1:]:
+        (pod_name, obis_name, reading_time, reading_value, reading_status) = line.split(";")
+
+        reading_time_timestamp = datetime.datetime.strptime(reading_time, "%Y.%m.%d %H:%M:%S").timestamp()*1e3
+
+        if(pod_name not in tmp):
+            tmp[pod_name] = dict()  
+            tmp[pod_name]["name"] = pod_name + " " + obis_name.replace("'", "")
+            tmp[pod_name]["unit"] = "kWh"
+            tmp[pod_name]["data"] = []
+
+        data_row = [int(reading_time_timestamp), float(reading_value), reading_status]
+        tmp[pod_name]["data"].append(data_row)
+
+    for pod_name in tmp:
+        json_data.append(tmp[pod_name])
+
+    return json.dumps(json_data)
 
 def store_json_blob(data: str):
     conn_str = os.environ['AzureWebJobsStorage']
