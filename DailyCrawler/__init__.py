@@ -60,7 +60,7 @@ def load_eon_w1000_report_csv() -> str:
         current_billing_date = current_billing_date.replace(year=today.year-1)
     
     since = min(this_year_start, current_billing_date)
-    next_month_start = (today + datetime.timedelta(days=32)).strftime('%Y-%m-01')
+    next_month_start = (today.replace(day=1) + datetime.timedelta(days=32)).replace(day=1)
 
     report_content = s.post(base_url + report_url, data={
         "reportId": eon_reportid,
